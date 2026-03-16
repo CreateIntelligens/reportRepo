@@ -1,0 +1,19 @@
+# Dependency directories
+node_modules/
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Credentials（絕對不可進入版控）
+credentials.local
+gcp-token.json
+gcp-credentials.json
+client_secret_*.json
+.mcp.json
