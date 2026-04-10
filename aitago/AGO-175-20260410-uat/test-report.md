@@ -9,7 +9,7 @@
 | 測試環境 | UAT（https://uat.sport115ntp.aitago.tw/） |
 | 測試人員 | williamsliu |
 | 測試工具 | MeterSphere（手動執行 + API 自動化輔助） |
-| MeterSphere 計畫 | [AGO-175 新北打卡](http://10.9.0.11:8081/#/test-plan/8442222076829696) |
+| MeterSphere 計畫 | [AGO-175 新北打卡](http://10.9.0.11:8081/#/test-plan/testPlanIndexDetail?id=8442222076829696&orgId=100001&pId=1102518104891392) |
 
 ---
 
