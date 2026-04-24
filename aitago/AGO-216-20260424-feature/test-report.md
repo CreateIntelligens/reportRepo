@@ -118,6 +118,32 @@ Auth 模組**完全健康**，無異常端點。
 
 其他 25+ Phase C 端點 p95 < 200ms，整體**健康**。
 
+### 🔁 Phase C Script 修復歷程（2026-04-24 Stage 1A + 1B）
+
+OpenAPI 對照糾正原假設：405/422 大多是 **script 結構錯誤**，非後端 bug。兩輪修復 + rerun 驗證：
+
+| 輪次 | 失敗數 | 比例 | 主要修復 |
+|------|------:|----:|---------|
+| 原 2026-04-23 | 604 | 34% | 基線 |
+| Stage 1A | 572 | 32% | 刪 `PUT /tags/{id}`（API 無此動詞）、`/coupons/{id}` 改 POST、tagging_tag/batch 結構修 |
+| **Stage 1B** | **452** | **25.5%** | 加 `source.id`、`line_user_ids`、更新 coupon 移 `is_unique_code`、notes 改 ULID |
+
+**四類 script 修復實證**（curl + OpenAPI 驗證）：
+1. `PUT /line_users/tagging_tag`：`source` 需 `{id, type}` 兩欄位
+2. `POST /line_users/batch_tagging_tag`：`line_users.line_user_ids`（非 `.ids`）
+3. `POST /coupons/{id}` 更新：**移除 `is_unique_code`**（API 訊息「is unique code 必須缺少」）
+4. `POST /notes`：`user_id` 必須是 LineUser 內部 ULID（`01jq...`），非 LINE UID
+
+**扣除真 Bug 240 筆後**：剩 212 筆（12%）全為 script/fixture 議題，非後端 bug。真正穩定重現的後端 500 僅兩條（AGO-229/230）。
+
+### 🆕 Phase C 新 Finding
+
+| # | Finding | 類型 |
+|---|---------|:----:|
+| 1 | `PUT /line_users/tagging_tag` 空 tags array (`tags: []`) 仍 422 | script 限制（非 bug，實際 UI 不送空）|
+| 2 | `POST /line_users/batch_tagging_tag` 帶 `source:{id}` 缺 `type` → **後端 500 `Undefined array key "type"`**（`LineUsersService.php:105`）| **後端 edge case bug 候選**（validation 未擋，service 層 NPE）|
+| 3 | Stage 2 未修：`PUT /coupons/codes/lock` / `POST /coupons/codes/cancel` / `POST /prizes` | 有副作用或需 fixture，保留待下輪 |
+
 ---
 
 ## 異常端點總結（5 個新 Bug 單）
