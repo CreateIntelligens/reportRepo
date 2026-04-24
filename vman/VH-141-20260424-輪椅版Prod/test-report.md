@@ -20,7 +20,7 @@
 | MANUAL 手動 | 6 筆 |
 | **SUCCESS** | **28 / 33（84.8%）** |
 | **ERROR** | **5 / 33（15.2%）** |
-| 新發現 Bug | **2 張**（VH-142 / VH-143）|
+| 新發現 Bug | **3 張**（VH-142 / VH-143 / VH-144）|
 | Console Error | 0 |
 
 ### 結果分佈
@@ -152,7 +152,7 @@ VH-48 護聯 KIOSK 輪椅版前端切版串接已完成，RD 推版至 prod http
 
 ---
 
-## 🐛 新發現 Bug（2 張，已建單）
+## 🐛 新發現 Bug（3 張，已建單）
 
 ### [VH-142](https://ai360c.atlassian.net/browse/VH-142) P1 輪椅版 position 未持久化
 
@@ -180,6 +180,32 @@ VH-48 護聯 KIOSK 輪椅版前端切版串接已完成，RD 推版至 prod http
 **對比**：已對話過再開 FAQ 切換 → 正常（下方區塊功能正確顯示）。
 
 **建議修正**：檢查 `ChatActionControls.vue` / `ChatReadyOverlay.vue` 在 FAQ panel open + dialogHistory 為空時 bottom layout 的 render 條件。
+
+---
+
+### [VH-144](https://ai360c.atlassian.net/browse/VH-144) P1 輪椅版對話 viewport 未延伸到底部功能列
+
+**發現**：使用者 2026-04-24 測試對話後額外發現
+
+**問題**：輪椅版 conversation 模式下，對話歷史 viewport 底部與底部功能列間留 **322 px 空隙**，壓縮對話顯示空間。
+
+**代碼證據**（`vman護聯/frontend/src/constants/ui.ts`）：
+```
+CONVERSATION_BOTTOM_DIALOG_VIEWPORT = { top: 1050, height: 800 }
+  → viewport 下緣 Y = 1850
+CONVERSATION_BOTTOM_CONTAINER = { top: 2172 }
+  → 底部功能列背板上緣 Y = 2172
+空隙 = 2172 - 1850 = 322 px
+```
+
+**註解矛盾**（ui.ts:238-242）：原註解寫 "Starts at the virtual person's shoulder line (Y=1350) and extends down to the bottom container (Y=2172)"，但實作 `top=1050` 與 `height=800` 既非 Y=1350 起始，也沒延伸到 Y=2172。
+
+**對輪椅使用者影響**：對話顯示區從可用 1122 px 被壓縮為 800 px（減少 28%），與輪椅版介面下移的設計意圖相違。
+
+**建議修正**：
+- 選項 A（最大化對話區）：`height` 改為 `1122`（延伸到 Y=2172）
+- 選項 B（遵循原註解）：`top` 改為 `1350`、`height` 改為 `822`
+- 兩選項擇一後同步更新 ui.ts:238-242 註解使實作與註解一致
 
 ---
 
