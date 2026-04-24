@@ -24,7 +24,7 @@
 | Phase 4 | [AGO-223](https://ai360c.atlassian.net/browse/AGO-223) | 執行測試 | — | — | ✅ Done |
 | Phase 5 | [AGO-224](https://ai360c.atlassian.net/browse/AGO-224) | 彙整報告 | — | — | ✅ Done |
 | 失敗拆解 | [AGO-227](https://ai360c.atlassian.net/browse/AGO-227) | per-endpoint 分析 | — | — | ✅ Done |
-| **總計** | | | **1586** | **~20.30%** → script 修後 ~9.7%（Phase A）| ⚠️ 5 Bug |
+| **總計** | | | **1586**（+rerun ~5332 次）| **Phase A 12.9% → 9.67% / Phase B 0% / Phase C 34% → 25.5% → 扣真 Bug 僅 12%** | ⚠️ 5 Bug 待 RD |
 
 ### 執行輪次
 
@@ -35,7 +35,9 @@
 | Phase C | 2026-04-22 | C | ~30m | `phase-c-clean2-dashboard.html` |
 | **Phase A raw** | **2026-04-23 21:12** | **A** | **35m37s** | **`phase-a-raw-20260423-211202.json` 5.9MB** |
 | **Phase C raw** | **2026-04-23 21:59** | **C** | **37m53s** | **`phase-c-raw-20260423-215947.json` 5.8MB** |
-| **Phase A re-run**（script 修復後）| **2026-04-24 09:32** | **A** | **35m39s** | **`phase-a-raw-20260424-093213.json` 5.9MB** |
+| **Phase A re-run**（script 修 keywords/check_binding）| **2026-04-24 09:32** | **A** | **35m39s** | **`phase-a-raw-20260424-093213.json` 5.9MB** |
+| **Phase C re-run Stage 1A**（script 結構修）| **2026-04-24 15:45** | **C** | **36m38s** | **`phase-c-raw-20260424-154501.json` 5.6MB** |
+| **Phase C re-run Stage 1B**（source.id / ULID / is_unique_code 修）| **2026-04-24 16:27** | **C** | **36m24s** | **`phase-c-raw-20260424-162721.json` 5.7MB** |
 
 ---
 
@@ -90,23 +92,28 @@ Auth 模組**完全健康**，無異常端點。
 
 ## Phase C — 寫入（POST / PUT / DELETE）
 
-### ❌ 失敗端點（2026-04-23 raw 拆解）
+### ❌ 失敗端點（以 Stage 1B rerun 為準，2026-04-24 16:27）
 
 | Endpoint | Failed | Status | 分類 |
 |----------|:------:|:------:|------|
-| `PUT /templates/{id}` | 120 (30×4) | **500** | 🚨 [AGO-229](https://ai360c.atlassian.net/browse/AGO-229) |
-| `PUT /coupons/categories/{id}` | 120 (30×4) | **500** | 🚨 [AGO-230](https://ai360c.atlassian.net/browse/AGO-230) |
-| `PUT /tags/{id}` | 30 | 405 | k6 方法錯（應為 PATCH，待修） |
-| `PUT /coupons/{id}` | 30 | 405 | k6 方法錯（應為 PATCH，待修） |
-| `PUT /line_users/tagging_tag` 系列（3 條） | 90 / 30 / 30 | 422 | script 參數不足 |
-| `PUT /coupons/codes/lock` | 30 | 422 | script 參數不足 |
-| `POST /prizes` | 30 | 422 | script 參數不足 |
-| `POST /notes` | 30 | 422 | script 參數不足 |
-| `POST /line_users/batch_tagging_tag` | 30 | 422 | script 參數不足 |
-| `POST /coupons/codes/cancel` | 30 | 422 | script 參數不足 |
-| `DELETE /coupons/categories/{id}` | 2 | 0 | 連線錯（零星 timeout）|
+| `PUT /templates/{id}` | 120 (30×4) | **500** | 🚨 [AGO-229](https://ai360c.atlassian.net/browse/AGO-229) **真 Bug** |
+| `PUT /coupons/categories/{id}` | 120 (30×4) | **500** | 🚨 [AGO-230](https://ai360c.atlassian.net/browse/AGO-230) **真 Bug** |
+| `PUT /line_users/tagging_tag (restore-batch)` | 90 | 422 | script 空 tags 陣列（非 bug）|
+| `PUT /line_users/tagging_tag (restore)` | 30 | 422 | 同上 |
+| `PUT /coupons/codes/lock` | 30 | 422 | Stage 2 未修（副作用風險）|
+| `POST /coupons/codes/cancel` | 30 | 422 | Stage 2 未修（副作用風險）|
+| `POST /prizes` | 30 | 422 | Stage 2 未修（需 fixture）|
+| 零星（mbti cache / materials convert）| 2 | 422 | 偶發 |
 
-**Phase C 失敗率：~34%（604/1777 含 retry）**，但**真後端 500 bug 僅 2 條**（AGO-229/230），其餘為腳本/規格問題。
+**Phase C 最終失敗率：25.5%（452/1775 含 retry）**，扣除真 Bug 240 筆後，剩 **212 筆（12%）** 皆為 script/fixture 議題，非後端 bug。
+
+### 歷史輪次比較
+
+| 輪次 | 失敗數 | 比例 |
+|------|------:|----:|
+| 原 2026-04-23 | 604 | 34% |
+| Stage 1A | 572 | 32% |
+| **Stage 1B**（最終）| **452** | **25.5%** |
 
 ### 偏慢寫入端點（200 OK，但 p95 > 500ms）
 
