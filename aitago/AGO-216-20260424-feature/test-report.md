@@ -1,0 +1,236 @@
+# 測試報告 — AGO-216 Aitago API 效能基線量測
+
+## 基本資訊
+
+| 項目 | 內容 |
+|------|------|
+| 報告類型 | Feature 環境 API 效能基線測試 |
+| 測試日期 | 2026-04-22 ~ 2026-04-24 |
+| 測試環境 | `https://feature-line-crm.aitago.tw/api`（develop 分支）|
+| 測試人員 | williamsliu |
+| 測試工具 | **k6 v1.7.1**（單 VU 線性量測）+ jq（raw JSON 分析）|
+| 執行模式 | vus=1, iterations=30/endpoint, think_time=400ms, timeout=30s, max_retries=3 |
+| Epic | [AGO-216](https://ai360c.atlassian.net/browse/AGO-216) |
+
+---
+
+## 總覽
+
+| Phase | 子工單 | 內容 | 請求數 | 失敗率 | 結果 |
+|-------|-------|------|-------:|-------:|:----:|
+| Phase 1 | [AGO-220](https://ai360c.atlassian.net/browse/AGO-220) | 盤點 104 條 API | — | — | ✅ Done |
+| Phase 2 | [AGO-221](https://ai360c.atlassian.net/browse/AGO-221) | k6 + fixture 準備 | — | — | ✅ Done |
+| Phase 3 | [AGO-222](https://ai360c.atlassian.net/browse/AGO-222) | 撰寫 A/B/C 腳本 | — | — | ✅ Done |
+| Phase 4 | [AGO-223](https://ai360c.atlassian.net/browse/AGO-223) | 執行測試 | — | — | ✅ Done |
+| Phase 5 | [AGO-224](https://ai360c.atlassian.net/browse/AGO-224) | 彙整報告 | — | — | ✅ Done |
+| 失敗拆解 | [AGO-227](https://ai360c.atlassian.net/browse/AGO-227) | per-endpoint 分析 | — | — | ✅ Done |
+| **總計** | | | **1586** | **~20.30%** → script 修後 ~9.7%（Phase A）| ⚠️ 5 Bug |
+
+### 執行輪次
+
+| Run | 日期時間 | Phase | 耗時 | 輸出 |
+|-----|---------|-------|------|------|
+| Phase A initial | 2026-04-22 | A | ~30m | `phase-a-clean-dashboard.html` |
+| Phase B | 2026-04-22 | B | ~5m | `phase-b-summary.json`（0% fail）|
+| Phase C | 2026-04-22 | C | ~30m | `phase-c-clean2-dashboard.html` |
+| **Phase A raw** | **2026-04-23 21:12** | **A** | **35m37s** | **`phase-a-raw-20260423-211202.json` 5.9MB** |
+| **Phase C raw** | **2026-04-23 21:59** | **C** | **37m53s** | **`phase-c-raw-20260423-215947.json` 5.8MB** |
+| **Phase A re-run**（script 修復後）| **2026-04-24 09:32** | **A** | **35m39s** | **`phase-a-raw-20260424-093213.json` 5.9MB** |
+
+---
+
+## Phase A — GET 純讀取（重跑 2026-04-24 為準）
+
+### 🔴 嚴重慢端點（p95 > 1s）
+
+| Endpoint | n | p50 | **p95** | p99 | max | 狀態 |
+|----------|:--:|----:|--------:|----:|----:|:----:|
+| `GET /line_users/coupons` | 30 | 5145 | **7469** | 8983 | 8983 | ✅ 200（**慢但零失敗**） |
+| `GET /coupons` | 30 | 5163 | **7260** | 8738 | 8738 | ✅ 200（**慢但零失敗**） |
+| `GET /materials` | 30 | 874 | **2038** | 2105 | 2105 | ⚠️ 兩輪 p95 落差大（前次 423ms） |
+| `GET /campaigns/{id}/insights` | 30 | 240 | **1264** | 1448 | 1448 | ⚠️ 聚合運算未 cache? |
+
+### 🟡 偏慢（500ms~1s）
+
+| Endpoint | p95 |
+|----------|----:|
+| `GET /metrics/line` | 799 |
+| `GET /audiences` | 592 |
+
+### ❌ 失敗端點（重跑後）
+
+| Endpoint | Failed | Status | 處理 |
+|----------|:------:|:------:|------|
+| `GET /metrics/user_tagging` | 120 (30×4 retry) | **500** | 🚨 [AGO-228](https://ai360c.atlassian.net/browse/AGO-228) |
+| `GET /playground/get_lottery` | 30 | 400 | fixture 不足（待補）|
+| `GET /keywords/answer` | 30 | 422 | 需 LINE reply_token 無法 mock（排除）|
+
+**Phase A 失敗率：9.67%（180/1861）** — 扣除已知限制後，**真 server error = 120/1861 = 6.45%**，全源於 AGO-228。
+
+### Script 修復驗證 ✅（2026-04-24 re-run 前/後對比）
+
+| Endpoint | 修復前 | 修復後 |
+|----------|:------:|:-----:|
+| `GET /keywords/exists?keyword=`（原參數名 `name` → `keyword`）| 30/30 422 | **30/30 200** |
+| `GET /line_users/check_binding_status?email=&line_user_id=`（補必填）| 30/30 422 | **30/30 200** |
+
+---
+
+## Phase B — 認證（/token /refresh /revoke）
+
+| 指標 | 結果 |
+|------|------|
+| 總請求 | 60 |
+| 失敗 | **0（0%）** ✅ |
+| p95 | < 500ms |
+
+Auth 模組**完全健康**，無異常端點。
+
+---
+
+## Phase C — 寫入（POST / PUT / DELETE）
+
+### ❌ 失敗端點（2026-04-23 raw 拆解）
+
+| Endpoint | Failed | Status | 分類 |
+|----------|:------:|:------:|------|
+| `PUT /templates/{id}` | 120 (30×4) | **500** | 🚨 [AGO-229](https://ai360c.atlassian.net/browse/AGO-229) |
+| `PUT /coupons/categories/{id}` | 120 (30×4) | **500** | 🚨 [AGO-230](https://ai360c.atlassian.net/browse/AGO-230) |
+| `PUT /tags/{id}` | 30 | 405 | k6 方法錯（應為 PATCH，待修） |
+| `PUT /coupons/{id}` | 30 | 405 | k6 方法錯（應為 PATCH，待修） |
+| `PUT /line_users/tagging_tag` 系列（3 條） | 90 / 30 / 30 | 422 | script 參數不足 |
+| `PUT /coupons/codes/lock` | 30 | 422 | script 參數不足 |
+| `POST /prizes` | 30 | 422 | script 參數不足 |
+| `POST /notes` | 30 | 422 | script 參數不足 |
+| `POST /line_users/batch_tagging_tag` | 30 | 422 | script 參數不足 |
+| `POST /coupons/codes/cancel` | 30 | 422 | script 參數不足 |
+| `DELETE /coupons/categories/{id}` | 2 | 0 | 連線錯（零星 timeout）|
+
+**Phase C 失敗率：~34%（604/1777 含 retry）**，但**真後端 500 bug 僅 2 條**（AGO-229/230），其餘為腳本/規格問題。
+
+### 偏慢寫入端點（200 OK，但 p95 > 500ms）
+
+| Endpoint | p50 | p95 | max |
+|----------|----:|----:|----:|
+| `POST /templates` | 434 | 587 | 611 |
+| `DELETE /templates/{id}` | 469 | 581 | 599 |
+| `POST /short_urls` | 282 | 360 | 453 |
+
+其他 25+ Phase C 端點 p95 < 200ms，整體**健康**。
+
+---
+
+## 異常端點總結（5 個新 Bug 單）
+
+| 工單 | Endpoint | 現象 | Priority |
+|------|---------|------|:--:|
+| [AGO-225](https://ai360c.atlassian.net/browse/AGO-225) | `GET /coupons` | p95 7.2s（慢） | High |
+| [AGO-226](https://ai360c.atlassian.net/browse/AGO-226) | `GET /line_users/coupons` | p95 7.5s + 公開 + 無 cache + DoS 風險 | **Highest** |
+| [AGO-228](https://ai360c.atlassian.net/browse/AGO-228) | `GET /metrics/user_tagging` | 100% 回 500 | High |
+| [AGO-229](https://ai360c.atlassian.net/browse/AGO-229) | `PUT /templates/{id}` | 100% 回 500 | High |
+| [AGO-230](https://ai360c.atlassian.net/browse/AGO-230) | `PUT /coupons/categories/{id}` | 100% 回 500 | High |
+
+---
+
+## 關鍵發現
+
+### 1. 失敗與慢延遲**無關**
+顛覆原始假設「慢 endpoint 容易 timeout 失敗」：
+- AGO-225 `/coupons`（7.2s）：**零失敗**（30/30 OK）
+- AGO-226 `/line_users/coupons`（7.5s）：**零失敗**（30/30 OK）
+- 失敗完全集中在另外 5（Phase A）+ 15（Phase C）個 endpoint
+
+### 2. 三個 100% 失敗的 500 Bug
+- AGO-228（metrics/user_tagging）：同 token 打其他 metrics 皆 200，**確認 endpoint 本身壞**
+- AGO-229 / AGO-230：同模組 POST/DELETE/GET 皆 200，**只有 PUT 壞**
+
+### 3. 一條 Bug 修復效率（AGO-213 / AGO-214 衍生）
+開發 AGO-198 時發現前端時區 workaround（AGO-213）與後端 `MarketingTriggerService` time-parse bug（AGO-214，**尚未修**）— 效能基線測試間接驗證到這條鏈路。
+
+---
+
+## SLO 建議（基於本輪基線）
+
+| 類別 | p95 目標 | p99 目標 | 現狀 |
+|------|:--------:|:--------:|:----:|
+| Read（GET）| < 200ms | < 500ms | 4 條超標（AGO-225/226 + /materials + insights）|
+| Write | < 300ms | < 800ms | 3 條超標（templates 系列）|
+| Auth（/token*）| < 150ms | < 300ms | ✅ 已達成 |
+| 公開 endpoint | < 500ms | < 1s | AGO-226 嚴重超標 |
+| 整體 5xx rate | < 0.1% | — | AGO-228 單條 100% 超標 |
+| Write 端點失敗率 | < 1% | — | 待 RD 修完 AGO-229/230 |
+
+---
+
+## 測試範圍（對照 Epic §1.2）
+
+### ✅ In Scope
+- 104 條 JWT 認證 API（A GET / B Auth / C Write）
+- feature 環境 + develop 分支
+- k6 單 VU 線性量測
+
+### ❌ Out of Scope
+- Partner API（無 API Key）
+- D 類非同步任務 / E 類檔案上傳
+- Webhook / 管理類 API
+- 壓測 / 併發
+- 多租戶測試情境
+
+---
+
+## 下一步建議
+
+### 立即（本週）
+1. RD 接手 **AGO-228 / AGO-229 / AGO-230**（3 個 500 Bug）
+2. RD 接手 **AGO-225 / AGO-226**（2 個慢 endpoint，共用 CouponRepository）
+3. QA 修 script：`PUT /tags/{id}` + `PUT /coupons/{id}` 改 PATCH，重跑 Phase C
+
+### 下輪（兩週內）
+1. `/materials` p95 2038 vs 423 差異 — 跑第三輪 confirm
+2. `/campaigns/{id}/insights` 1.3s 聚合 cache 評估
+3. 8 個 422 endpoint 規格釐清補 script
+
+### 長期
+1. D / E 類 API 測試
+2. Partner API（需 API Key）
+3. CI 週期化（k6 + InfluxDB + Grafana / GitHub Actions）
+4. 壓測（vus=50, duration=5m）— 需 RD 確認環境承受度
+
+---
+
+## 附錄
+
+### 相關文件（於 aitago_test repo）
+- 測試計劃：`docs/api-performance-test-plan.md`
+- 端點清單：`docs/api-performance-targets.md`
+- **完整 Findings**：`docs/api-performance-findings-2026-04-23.md`
+- **Phase 5 正式報告**：`docs/api-performance-report-2026-04-22.md`
+- k6 腳本：`api-perf/scripts/phase-{a,b,c}.js`
+- Raw JSON：`api-perf/results/phase-{a,c}-raw-*.json`（> 10MB 未進本 repo）
+- Dashboard HTML：`api-perf/results/phase-{a,c}-*dashboard.html`
+
+### Jira Epic 結構
+```
+AGO-216 Epic（進行中，待 Bug 關閉後收尾）
+├─ Phase 1 AGO-220 ✅ 完成
+├─ Phase 2 AGO-221 ✅ 完成
+├─ Phase 3 AGO-222 ✅ 完成
+├─ Phase 4 AGO-223 ✅ 完成
+├─ Phase 5 AGO-224 ✅ 完成
+├─ 失敗拆解 AGO-227 ✅ 完成
+├─ AGO-225 Bug / High — 待 RD
+├─ AGO-226 Bug / Highest — 待 RD
+├─ AGO-228 Bug / High — 待 RD
+├─ AGO-229 Bug / High — 待 RD
+└─ AGO-230 Bug / High — 待 RD
+```
+
+### QA 工具環境
+- k6 v1.7.1（darwin/arm64）
+- jq 1.7.1
+- Python 3.12（orchestrator scripts）
+- ai360-4f WiFi（MeterSphere）
+
+---
+
+**報告交付**：williamsliu → 2026-04-24
